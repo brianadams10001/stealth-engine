@@ -44,12 +44,15 @@ const MasterDomainPage: React.FC = () => {
     });
     setEditingDomain(null);
 
-    const gatewayUrl = localStorage.getItem('cf_gateway_url');
+    let gatewayUrl = localStorage.getItem('cf_gateway_url');
 
     if (!gatewayUrl) {
        updateStatus(updated.id, 'error', 'Gateway URL Missing in Settings');
        return;
     }
+
+    // Sanitization: Remove trailing slashes
+    gatewayUrl = gatewayUrl.replace(/\/+$/, "");
 
     try {
       // Sync to Worker Edge
@@ -64,13 +67,13 @@ const MasterDomainPage: React.FC = () => {
 
       if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || "Worker Rejected Config");
+          throw new Error(errData.error || `Worker Rejected: ${res.status}`);
       }
 
       updateStatus(updated.id, 'synced');
     } catch (e: any) {
       console.error("Deploy Failure", e);
-      updateStatus(updated.id, 'error', e.message);
+      updateStatus(updated.id, 'error', e.message || "Network Error");
     }
   };
 

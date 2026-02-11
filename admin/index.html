@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StealthCloak | Industrial Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+        body { 
+            background-color: #020617; 
+            margin: 0; padding: 0; 
+            font-family: 'Space Grotesk', sans-serif;
+            overflow-x: hidden;
+            color: #f8fafc;
+        }
+        #root-loading {
+            position: fixed; inset: 0; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 9999;
+            background: #020617; color: #22d3ee;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 2px solid #1e293b;
+            border-top-color: #22d3ee; border-radius: 50%;
+            animation: spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+            margin-bottom: 24px;
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.2);
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text {
+            letter-spacing: 0.3em; font-size: 11px; font-weight: 800; 
+            text-transform: uppercase; animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #020617; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #22d3ee; }
+    </style>
+</head>
+<body class="selection:bg-cyan-500/30">
+    <div id="root-loading">
+        <div class="spinner"></div>
+        <div class="loading-text">Authenticating Industrial Link...</div>
+    </div>
+    <div id="root"></div>
+    <!-- CHANGED: Use relative path ./index.tsx instead of absolute /index.tsx -->
+    <script type="module" src="./index.tsx"></script>
+</body>
+</html>

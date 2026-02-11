@@ -1,5 +1,5 @@
 /**
- * StealthCloak Industrial Engine - v3.7.0 (FINAL)
+ * StealthCloak Industrial Engine - v3.7.1 (FINAL)
  * Handles Traffic Filtering, Analytics Streaming (SSE), and Config Management.
  */
 
@@ -52,7 +52,7 @@ export default {
          return new Response(JSON.stringify({ 
            status: "ONLINE", 
            bindings: { kv: !!env.CONFIG, d1: !!env.DB },
-           engine: "v3.7.0-FINAL",
+           engine: "v3.7.1-FINAL",
            timestamp: Date.now()
          }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
        }
@@ -102,11 +102,20 @@ export default {
        if (url.pathname.endsWith('/config') && request.method === "POST") {
          try {
            const body = await request.json();
+           
+           // Validation
+           if (!body.domainName) {
+              return new Response(JSON.stringify({ error: "Validation Failed: domainName is required" }), { status: 400, headers: corsHeaders });
+           }
+           if (!body.moneyUrl || !body.safeUrl) {
+              return new Response(JSON.stringify({ error: "Validation Failed: moneyUrl and safeUrl are required" }), { status: 400, headers: corsHeaders });
+           }
+
            // Save to KV
            await env.CONFIG.put(`domain:${body.domainName}`, JSON.stringify(body));
-           return new Response(JSON.stringify({ success: true, id: body.id }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+           return new Response(JSON.stringify({ success: true, id: body.id, message: "Configuration synced to Edge" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
          } catch (e) {
-           return new Response(JSON.stringify({ error: e.message }), { status: 400, headers: corsHeaders });
+           return new Response(JSON.stringify({ error: e.message || "Invalid JSON" }), { status: 400, headers: corsHeaders });
          }
        }
        
