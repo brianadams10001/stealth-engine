@@ -8,8 +8,6 @@ const MasterDomainPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    // In a real app, you would fetch this list from the worker KV via a GET endpoint.
-    // For safety, we keep the list local or empty for now.
     setIsLoading(false);
   }, []);
 
