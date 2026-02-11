@@ -1,5 +1,4 @@
 
-
 export type NavItem = 'dashboard' | 'master-domain' | 'safe-site' | 'multi-master' | 'settings';
 
 export interface DomainConfig {
