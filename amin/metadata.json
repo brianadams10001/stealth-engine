@@ -1,5 +1,0 @@
-{
-  "name": "StealthCloak Industrial Engine",
-  "description": "An elite-tier Cloudflare-native cloaking engine and admin panel featuring edge-side masking, ASN filtering, and ghost referrer spoofing for registry abuse protection.",
-  "requestFramePermissions": []
-}
